@@ -76,3 +76,34 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(107, 98, 87, 0.4);
 }
+
+/* Red Sheet Target & Masking Styles (Optical Physical Masking) */
+.kotoba-rs-chunk {
+  display: inline;
+  padding: 0 !important;
+  margin: 0 !important;
+  letter-spacing: inherit !important;
+  transition: background-color 0.08s ease, color 0.08s ease;
+}
+
+.kotoba-rs-chunk.is-covered {
+  background-color: #E11D48 !important;
+  color: #E11D48 !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  border-radius: 2px;
+}
+
+.kotoba-rs-chunk.is-uncovered {
+  background-color: transparent !important;
+  color: #E11D48 !important;
+  font-weight: 700;
+}
+
+/* While user is holding Peek (透かす), temporarily reveal covered text */
+.card-peeking .kotoba-rs-chunk.is-covered {
+  background-color: transparent !important;
+  color: #E11D48 !important;
+  font-weight: 700;
+}
+
