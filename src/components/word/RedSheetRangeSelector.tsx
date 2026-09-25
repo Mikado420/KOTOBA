@@ -152,12 +152,52 @@ export const RedSheetRangeSelector: React.FC<RedSheetRangeSelectorProps> = ({
       );
     }
 
-    // Split text into tokens based on ranges
-    const marks: { pos: number; type: 'start' | 'end'; id: string }[] = [];
-    relevantRanges.forEach((r) => {
-      marks.push({ pos: r.start, type: 'start', id: r.id });
-      marks.push({ pos: r.end, type: 'end', id: r.id });
-    });
+    const validRanges = relevantRanges
+      .filter((r) => r.start >= 0 && r.end > r.start && r.start < text.length)
+      .sort((a, b) => a.start - b.start);
+
+    if (validRanges.length === 0) {
+      return (
+        <span
+          className="select-text cursor-text"
+          onMouseUp={() => handleTextSelection(field, text, mIdx, eIdx, eField)}
+          onTouchEnd={() => handleTextSelection(field, text, mIdx, eIdx, eField)}
+        >
+          {text}
+        </span>
+      );
+    }
+
+    // Merge overlapping ranges
+    const merged: { start: number; end: number }[] = [];
+    for (const r of validRanges) {
+      const start = Math.max(0, r.start);
+      const end = Math.min(text.length, r.end);
+      if (merged.length === 0) {
+        merged.push({ start, end });
+      } else {
+        const prev = merged[merged.length - 1];
+        if (start <= prev.end) {
+          prev.end = Math.max(prev.end, end);
+        } else {
+          merged.push({ start, end });
+        }
+      }
+    }
+
+    // Build contiguous slices
+    const slices: { text: string; isCovered: boolean }[] = [];
+    let cursor = 0;
+    for (const m of merged) {
+      if (m.start > cursor) {
+        slices.push({ text: text.slice(cursor, m.start), isCovered: false });
+      }
+      slices.push({ text: text.slice(m.start, m.end), isCovered: true });
+      cursor = m.end;
+    }
+    if (cursor < text.length) {
+      slices.push({ text: text.slice(cursor), isCovered: false });
+    }
 
     return (
       <span
@@ -165,18 +205,17 @@ export const RedSheetRangeSelector: React.FC<RedSheetRangeSelectorProps> = ({
         onMouseUp={() => handleTextSelection(field, text, mIdx, eIdx, eField)}
         onTouchEnd={() => handleTextSelection(field, text, mIdx, eIdx, eField)}
       >
-        {text.split('').map((char, idx) => {
-          const isCovered = relevantRanges.some((r) => idx >= r.start && idx < r.end);
+        {slices.map((slice, idx) => {
+          if (!slice.isCovered) {
+            return <React.Fragment key={idx}>{slice.text}</React.Fragment>;
+          }
           return (
             <span
               key={idx}
-              className={
-                isCovered
-                  ? 'bg-rose-100 text-rose-700 font-semibold border-b-2 border-rose-500 rounded-xs px-0.5'
-                  : ''
-              }
+              className="bg-rose-100 text-[#E11D48] font-bold border-b-2 border-[#E11D48] inline"
+              style={{ padding: 0, margin: 0, letterSpacing: 'inherit' }}
             >
-              {char}
+              {slice.text}
             </span>
           );
         })}

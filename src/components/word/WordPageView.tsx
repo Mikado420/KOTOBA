@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Word, Chapter, StickyNote, AppSettings, RedSheetRange } from '../../types';
 import { StickyNotesTray } from './StickyNotesTray';
 import { WordEditModal } from './WordEditModal';
@@ -45,12 +45,17 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     Math.min(Math.max(0, initialWordIndex), Math.max(0, words.length - 1))
   );
 
-  // Red sheet state
+  // Red sheet state:
+  // Starts at 100% (covering the card from top down to bottom).
+  // Pulling the handle at the bottom edge UP reduces the covered height.
+  // Pulling DOWN increases the covered height.
   const [redSheetActive, setRedSheetActive] = useState(false);
-  // Red sheet vertical offset: 0% (top, fully covered) to 90% (dragged down)
-  const [redSheetOffsetPercent, setRedSheetOffsetPercent] = useState(0);
+  const [sheetCoverPercent, setSheetCoverPercent] = useState(100);
   const [isPeeking, setIsPeeking] = useState(false);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+
+  // Tick state to re-trigger real-time DOM position evaluations during dragging and scrolling
+  const [positionTick, setPositionTick] = useState(0);
 
   // Edit modal
   const [isEditing, setIsEditing] = useState(false);
@@ -66,7 +71,13 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Touch handling refs
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const sheetDragStartRef = useRef<{ startY: number; startPercent: number } | null>(null);
+
+  // DOM Refs for physical position checking
   const cardRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const wordHeaderRef = useRef<HTMLDivElement>(null);
+  const meaningItemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const exampleItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const currentWord = words[currentIndex] || null;
   const currentWordNotes = currentWord
@@ -83,6 +94,14 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       setCurrentIndex(words.length - 1);
     }
   }, [words.length]);
+
+  // When Red Sheet is activated, default to 100% coverage
+  useEffect(() => {
+    if (redSheetActive) {
+      setSheetCoverPercent(100);
+      setPositionTick((t) => t + 1);
+    }
+  }, [redSheetActive]);
 
   // Keyboard navigation for testing
   useEffect(() => {
@@ -157,7 +176,8 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     }
   };
 
-  // Robust Red Sheet Vertical Dragging via Pointer Events + Pointer Capture
+  // Red Sheet Dragging:
+  // Grabbing the bottom edge handle adjusts sheetCoverPercent between 0% and 100%.
   const handleSheetPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
@@ -172,20 +192,22 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     setIsDraggingSheet(true);
     sheetDragStartRef.current = {
       startY: e.clientY,
-      startPercent: redSheetOffsetPercent,
+      startPercent: sheetCoverPercent,
     };
   };
 
   const handleSheetPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!sheetDragStartRef.current) return;
+    if (!sheetDragStartRef.current || !cardRef.current) return;
     e.preventDefault();
     e.stopPropagation();
 
     const deltaY = e.clientY - sheetDragStartRef.current.startY;
-    const containerHeight = cardRef.current?.clientHeight || 450;
+    const containerHeight = cardRef.current.clientHeight || 450;
     const deltaPercent = (deltaY / containerHeight) * 100;
-    const nextPercent = Math.min(Math.max(0, sheetDragStartRef.current.startPercent + deltaPercent), 90);
-    setRedSheetOffsetPercent(nextPercent);
+    const nextPercent = Math.min(Math.max(0, sheetDragStartRef.current.startPercent + deltaPercent), 100);
+
+    setSheetCoverPercent(nextPercent);
+    setPositionTick((t) => t + 1);
   };
 
   const handleSheetPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -198,75 +220,140 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       sheetDragStartRef.current = null;
     }
     setIsDraggingSheet(false);
+    setPositionTick((t) => t + 1);
   };
 
-  // Text masking with Red Sheet:
-  // User-configured redSheetRanges:
-  // - In normal view: pink〜red text color (text-[#E11D48]), subtle soft pink background (bg-rose-50 px-1 rounded-sm), bold font.
-  // - In Red Sheet active & covering mode: masked with pure matching red (bg-[#E11D48] text-[#E11D48]), completely disappearing under the red filter!
-  const renderMaskedText = (
-    field: 'word' | 'meaning' | 'example',
+  // Card onScroll: update position check so scrolling long cards recalculates coverage
+  const handleCardScroll = () => {
+    setPositionTick((t) => t + 1);
+  };
+
+  // Real physical coverage detection:
+  // Compares the DOM element's viewport top with the red sheet's viewport bottom.
+  // If element is above the red sheet's bottom edge (and within card), it is physically covered!
+  const isElementCoveredBySheet = useCallback(
+    (el: HTMLElement | null) => {
+      if (!redSheetActive || isPeeking || !el || !sheetRef.current) {
+        return false;
+      }
+      const sheetRect = sheetRef.current.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+
+      // If the sheet height is basically 0, nothing is covered
+      if (sheetRect.height < 5) return false;
+
+      // The element is covered if its top enters inside the red sheet area (above sheet's bottom edge)
+      // and its bottom is below the sheet's top edge
+      return elRect.top + 4 < sheetRect.bottom && elRect.bottom > sheetRect.top;
+    },
+    [redSheetActive, isPeeking, positionTick]
+  );
+
+  // Range-based slice chunk rendering (Issue 1 & Issue 2):
+  // 1. Slices text into contiguous intervals instead of splitting by character.
+  // 2. Uses ZERO horizontal padding and ZERO margin so character kerning/spacing is 100% identical.
+  // 3. When covered by red sheet: rendered in a single solid red block (bg-[#E11D48] text-[#E11D48])
+  // 4. When uncovered: rendered in pink/red bold text without any layout shift.
+  const renderMaskedChunk = (
     text: string,
+    ranges: RedSheetRange[],
+    isCovered: boolean
+  ) => {
+    if (!text) return null;
+    if (!ranges || ranges.length === 0) {
+      return text;
+    }
+
+    const validRanges = ranges
+      .filter((r) => r.start >= 0 && r.end > r.start && r.start < text.length)
+      .sort((a, b) => a.start - b.start);
+
+    if (validRanges.length === 0) {
+      return text;
+    }
+
+    // Merge overlapping ranges
+    const merged: { start: number; end: number }[] = [];
+    for (const r of validRanges) {
+      const start = Math.max(0, r.start);
+      const end = Math.min(text.length, r.end);
+      if (merged.length === 0) {
+        merged.push({ start, end });
+      } else {
+        const prev = merged[merged.length - 1];
+        if (start <= prev.end) {
+          prev.end = Math.max(prev.end, end);
+        } else {
+          merged.push({ start, end });
+        }
+      }
+    }
+
+    // Build contiguous slices
+    const slices: { text: string; isTarget: boolean }[] = [];
+    let cursor = 0;
+    for (const m of merged) {
+      if (m.start > cursor) {
+        slices.push({ text: text.slice(cursor, m.start), isTarget: false });
+      }
+      slices.push({ text: text.slice(m.start, m.end), isTarget: true });
+      cursor = m.end;
+    }
+    if (cursor < text.length) {
+      slices.push({ text: text.slice(cursor), isTarget: false });
+    }
+
+    // Render slices with zero margin and zero padding to preserve character metrics exactly
+    return slices.map((slice, i) => {
+      if (!slice.isTarget) {
+        return <React.Fragment key={i}>{slice.text}</React.Fragment>;
+      }
+
+      if (isCovered) {
+        return (
+          <span
+            key={i}
+            className="bg-[#E11D48] text-[#E11D48] select-none rounded-xs inline"
+            style={{ padding: 0, margin: 0, letterSpacing: 'inherit' }}
+            title="赤シートで隠れています"
+          >
+            {slice.text}
+          </span>
+        );
+      }
+
+      return (
+        <span
+          key={i}
+          className="text-[#E11D48] font-bold inline"
+          style={{ padding: 0, margin: 0, letterSpacing: 'inherit' }}
+        >
+          {slice.text}
+        </span>
+      );
+    });
+  };
+
+  // Helper to extract relevant ranges for a field
+  const getRangesFor = (
+    field: 'word' | 'meaning' | 'example',
     mIdx?: number,
     eIdx?: number,
     eField?: 'text' | 'translation'
-  ) => {
-    if (!currentWord) return text;
-
-    const relevantRanges = (currentWord.redSheetRanges || []).filter(
+  ): RedSheetRange[] => {
+    if (!currentWord || !currentWord.redSheetRanges) return [];
+    return currentWord.redSheetRanges.filter(
       (r) =>
         r.field === field &&
         r.meaningIndex === mIdx &&
         r.exampleIndex === eIdx &&
         (field !== 'example' || r.exampleField === eField)
     );
-
-    if (relevantRanges.length === 0) {
-      return <span>{text}</span>;
-    }
-
-    const isHidden = redSheetActive && !isPeeking && redSheetOffsetPercent < 60;
-
-    return (
-      <span className="leading-relaxed">
-        {text.split('').map((char, idx) => {
-          const isCovered = relevantRanges.some((r) => idx >= r.start && idx < r.end);
-
-          if (!isCovered) {
-            return <span key={idx}>{char}</span>;
-          }
-
-          if (isHidden) {
-            // When covered by Red Sheet: pure matching red bar so it disappears under the red sheet!
-            return (
-              <span
-                key={idx}
-                className="bg-[#E11D48] text-[#E11D48] select-none rounded-xs px-0.5 transition-colors"
-                title="赤シートで隠れています"
-              >
-                {char}
-              </span>
-            );
-          }
-
-          // When Red Sheet is OFF or revealed:
-          // Subtle pink〜red color with soft pink tint and bold, natural indication of study target
-          return (
-            <span
-              key={idx}
-              className="text-[#E11D48] bg-rose-50 font-bold px-0.5 rounded-xs"
-            >
-              {char}
-            </span>
-          );
-        })}
-      </span>
-    );
   };
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#F7F4EE] text-[#211E1C] select-none pb-safe">
-      {/* 1. Top Navigation: Fixed/following top bar with back, chapter, position, and menu */}
+      {/* 1. Top Navigation */}
       <header className="sticky top-0 z-30 bg-[#F7F4EE]/95 backdrop-blur-md border-b border-[#E6E0CF] px-3 py-2 pt-safe">
         <div className="max-w-md mx-auto flex items-center justify-between">
           {/* Back button (hit area >= 44x44px) */}
@@ -316,7 +403,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
         </div>
       </header>
 
-      {/* 2. Main Page Surface: Treated as a single continuous sheet of paper */}
+      {/* 2. Main Page Surface */}
       <main
         className="flex-1 max-w-md w-full mx-auto px-4 py-3 flex flex-col justify-start relative overflow-hidden"
         onTouchStart={handleTouchStart}
@@ -324,9 +411,10 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       >
         {words.length > 0 && currentWord ? (
           <div className="relative w-full">
-            {/* Paper Sheet Container - Clean single vertical sheet of paper without excessive cards/shadows */}
+            {/* Paper Sheet Container */}
             <div
               ref={cardRef}
+              onScroll={handleCardScroll}
               className={`w-full min-h-[calc(100vh-140px)] rounded-2xl bg-[#FFFDF8] border border-[#E8E2D2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between relative transition-transform duration-150 ${
                 isDraggingSheet ? 'overflow-hidden touch-none' : 'overflow-y-auto'
               } ${
@@ -340,13 +428,20 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
               {/* Vertical flow of word information */}
               <div>
                 {/* 1. Word Header: English word, Pronunciation, Part of Speech */}
-                <div className="pb-4 border-b border-[#EAE3D2]">
-                  {/* English Word: prominent, 36〜42px base, left-aligned, natural line wrap */}
+                <div
+                  ref={wordHeaderRef}
+                  className="pb-4 border-b border-[#EAE3D2]"
+                >
+                  {/* English Word */}
                   <h2 className="text-[34px] sm:text-[38px] leading-[1.18] font-bold text-[#1F1C1A] tracking-tight font-serif break-words">
-                    {renderMaskedText('word', currentWord.word)}
+                    {renderMaskedChunk(
+                      currentWord.word,
+                      getRangesFor('word'),
+                      isElementCoveredBySheet(wordHeaderRef.current)
+                    )}
                   </h2>
 
-                  {/* Pronunciation & Part of Speech directly underneath */}
+                  {/* Pronunciation & Part of Speech */}
                   <div className="flex items-center gap-2.5 mt-2 flex-wrap">
                     {currentWord.pronunciation && (
                       <span className="font-mono text-sm sm:text-[15px] font-semibold text-[#1D5E9E] tracking-wide">
@@ -361,26 +456,33 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                   </div>
                 </div>
 
-                {/* 2. Meanings: directly below word header, vertical list with blue-ish numeral labels */}
+                {/* 2. Meanings: directly below word header */}
                 {currentWord.meanings && currentWord.meanings.length > 0 && (
                   <div className="py-4 space-y-2.5 border-b border-[#EAE3D2]">
                     {currentWord.meanings.map((meaning, idx) => (
                       <div
                         key={idx}
+                        ref={(el) => {
+                          meaningItemRefs.current[idx] = el;
+                        }}
                         className="flex items-start gap-2.5 leading-relaxed"
                       >
                         <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-[#E8F0FA] text-[#1E427B] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 shadow-2xs font-mono">
                           {idx + 1}
                         </span>
                         <div className="text-[17px] sm:text-[19px] font-bold text-[#1F1C1A] flex-1 leading-snug">
-                          {renderMaskedText('meaning', meaning, idx)}
+                          {renderMaskedChunk(
+                            meaning,
+                            getRangesFor('meaning', idx),
+                            isElementCoveredBySheet(meaningItemRefs.current[idx])
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* 3. Examples (用例): unified section with EN and JA clearly paired */}
+                {/* 3. Examples: unified section with EN and JA clearly paired */}
                 {currentWord.examples && currentWord.examples.length > 0 && (
                   <div className="py-4 border-b border-[#EAE3D2] space-y-3">
                     <div className="text-[11px] font-bold text-[#8C8275] tracking-wider uppercase flex items-center gap-1.5">
@@ -389,21 +491,35 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
                     <div className="space-y-3">
                       {currentWord.examples.map((ex, idx) => (
-                        <div key={idx} className="space-y-1">
-                          {/* English sentence: 17〜19px, dark ink */}
+                        <div
+                          key={idx}
+                          ref={(el) => {
+                            exampleItemRefs.current[idx] = el;
+                          }}
+                          className="space-y-1"
+                        >
+                          {/* English sentence */}
                           <div className="text-[16px] sm:text-[18px] text-[#1F1C1A] font-medium leading-relaxed flex items-start gap-2">
                             <span className="text-xs font-bold text-[#8C8275] mt-1 shrink-0 font-mono">
                               {idx + 1}.
                             </span>
                             <div className="flex-1">
-                              {renderMaskedText('example', ex.text, undefined, idx, 'text')}
+                              {renderMaskedChunk(
+                                ex.text,
+                                getRangesFor('example', undefined, idx, 'text'),
+                                isElementCoveredBySheet(exampleItemRefs.current[idx])
+                              )}
                             </div>
                           </div>
 
-                          {/* Japanese translation: 15〜17px, slightly muted, indented */}
+                          {/* Japanese translation */}
                           {ex.translation && (
                             <div className="text-[14px] sm:text-[15px] text-[#5C544B] leading-relaxed pl-6">
-                              {renderMaskedText('example', ex.translation, undefined, idx, 'translation')}
+                              {renderMaskedChunk(
+                                ex.translation,
+                                getRangesFor('example', undefined, idx, 'translation'),
+                                isElementCoveredBySheet(exampleItemRefs.current[idx])
+                              )}
                             </div>
                           )}
                         </div>
@@ -412,7 +528,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                   </div>
                 )}
 
-                {/* 4. Memo (メモ): personal notes, pale yellow paper annotation style */}
+                {/* 4. Memo */}
                 {currentWord.memo && (
                   <div className="pt-4">
                     <div className="bg-[#FEFCE8] border border-[#FDE047]/50 rounded-xl p-3.5 text-xs sm:text-sm text-[#4A3E2C] leading-relaxed shadow-2xs">
@@ -446,20 +562,35 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
               </div>
             )}
 
-            {/* Red Sheet Draggable Translucent Plastic Overlay */}
+            {/* Red Sheet Draggable Translucent Plastic Overlay:
+                Anchored at top: 0, height matches sheetCoverPercent%.
+                The bottom handle bar (────────) is pulled up/down to adjust coverage.
+                Anything physically above the bottom handle is covered; anything below is uncovered! */}
             {redSheetActive && (
               <div
-                className="red-sheet-drag-area absolute inset-0 z-30 rounded-2xl overflow-hidden pointer-events-auto transition-transform duration-75 flex flex-col touch-none select-none"
+                ref={sheetRef}
+                className="red-sheet-drag-area absolute top-0 left-0 right-0 z-30 rounded-2xl overflow-hidden pointer-events-auto transition-[height] duration-75 flex flex-col touch-none select-none"
                 style={{
-                  transform: `translateY(${redSheetOffsetPercent}%)`,
+                  height: `${sheetCoverPercent}%`,
+                  minHeight: sheetCoverPercent > 0 ? '44px' : '0px',
                   backgroundColor: 'rgba(225, 29, 72, 0.82)',
                   boxShadow: '0 8px 30px rgba(190, 18, 60, 0.35)',
                   touchAction: 'none',
                 }}
               >
-                {/* Red sheet top drag bar / handle */}
+                {/* Translucent body */}
                 <div
-                  className="bg-[#BE123C] text-white px-4 py-2 flex items-center justify-between cursor-grab active:cursor-grabbing border-b border-white/20 select-none shadow-xs touch-none"
+                  className="flex-1 touch-none cursor-grab active:cursor-grabbing"
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={handleSheetPointerDown}
+                  onPointerMove={handleSheetPointerMove}
+                  onPointerUp={handleSheetPointerUp}
+                  onPointerCancel={handleSheetPointerUp}
+                />
+
+                {/* Red sheet bottom edge drag handle (────────) */}
+                <div
+                  className="h-10 bg-[#BE123C] text-white px-4 flex items-center justify-between cursor-grab active:cursor-grabbing border-t border-white/20 select-none shadow-md touch-none shrink-0"
                   style={{ touchAction: 'none' }}
                   onPointerDown={handleSheetPointerDown}
                   onPointerMove={handleSheetPointerMove}
@@ -475,9 +606,9 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
                   {/* Tactile Grab Indicator Bar in Center */}
                   <div className="flex items-center gap-1 px-3 py-1">
-                    <div className="w-10 h-1.5 rounded-full bg-white/60" />
+                    <div className="w-12 h-1.5 rounded-full bg-white/70" />
                     {isDraggingSheet && (
-                      <span className="text-[10px] text-white/90 font-medium ml-1 animate-pulse">
+                      <span className="text-[10px] text-white/90 font-medium ml-1.5 animate-pulse">
                         ↕ 移動中
                       </span>
                     )}
@@ -502,29 +633,20 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                       {isPeeking ? '透かし中' : '透かす'}
                     </button>
 
-                    {/* Quick pull down / reset */}
+                    {/* Quick Toggle: 100% full cover or 0% reveal */}
                     <button
                       type="button"
-                      onClick={() =>
-                        setRedSheetOffsetPercent(redSheetOffsetPercent > 30 ? 0 : 75)
-                      }
+                      onClick={() => {
+                        setSheetCoverPercent((prev) => (prev > 30 ? 0 : 100));
+                        setPositionTick((t) => t + 1);
+                      }}
                       className="px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold text-white transition active:scale-95 min-h-[32px]"
-                      title={redSheetOffsetPercent > 30 ? '戻す' : '下げる'}
+                      title={sheetCoverPercent > 30 ? '全開（めくる）' : '全閉（覆う）'}
                     >
-                      {redSheetOffsetPercent > 30 ? '全戻し' : '下げる'}
+                      {sheetCoverPercent > 30 ? '全開' : '覆う'}
                     </button>
                   </div>
                 </div>
-
-                {/* Translucent body (Clean, no distracting center watermark) */}
-                <div
-                  className="flex-1 touch-none"
-                  style={{ touchAction: 'none' }}
-                  onPointerDown={handleSheetPointerDown}
-                  onPointerMove={handleSheetPointerMove}
-                  onPointerUp={handleSheetPointerUp}
-                  onPointerCancel={handleSheetPointerUp}
-                />
               </div>
             )}
           </div>
@@ -547,14 +669,16 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
         )}
       </main>
 
-      {/* 3. Bottom Toolbar: Fixed at bottom, 4 items evenly distributed, tap area >= 44px */}
+      {/* 3. Bottom Toolbar */}
       <footer className="sticky bottom-0 z-30 bg-[#FAF7F0]/95 backdrop-blur-md border-t border-[#E8E2D2] px-3 py-2 pb-safe">
         <div className="max-w-md mx-auto grid grid-cols-4 items-center gap-1">
           {/* 1. 🟥 赤シート */}
           <button
             onClick={() => {
               setRedSheetActive(!redSheetActive);
-              setRedSheetOffsetPercent(0);
+              if (!redSheetActive) {
+                setSheetCoverPercent(100);
+              }
             }}
             className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[48px] active:scale-95 ${
               redSheetActive
