@@ -14,6 +14,7 @@ import {
   MoveVertical,
   Sliders,
   ChevronRight,
+  BookOpen,
 } from 'lucide-react';
 
 interface WordPageViewProps {
@@ -51,9 +52,10 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
   // Red sheet state
   const [redSheetActive, setRedSheetActive] = useState(false);
-  // Red sheet position: 0% (top) to 100% (bottom pulled down)
+  // Red sheet vertical offset: 0% (top, fully covered) to 90% (dragged down)
   const [redSheetOffsetPercent, setRedSheetOffsetPercent] = useState(0);
   const [isPeeking, setIsPeeking] = useState(false);
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false);
 
   // Edit modal
   const [isEditing, setIsEditing] = useState(false);
@@ -66,14 +68,19 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Page animation direction
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
 
-  // Touch handling for swipe
+  // Touch handling refs
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const sheetDragStartRef = useRef<{ startY: number; startPercent: number } | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const currentWord = words[currentIndex] || null;
   const currentWordNotes = currentWord
     ? stickyNotes.filter((n) => n.wordId === currentWord.id)
     : [];
+
+  // Chapter number calculation (e.g. Chapter 01)
+  const chapterIndex = chapters.findIndex((c) => c.id === chapter.id);
+  const chapterNumLabel = chapterIndex >= 0 ? `Chapter ${String(chapterIndex + 1).padStart(2, '0')}` : 'Chapter';
 
   // Reset index if words change
   useEffect(() => {
@@ -82,7 +89,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     }
   }, [words.length]);
 
-  // Keyboard navigation for desktop testing
+  // Keyboard navigation for testing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isEditing || isAdding || jumpOpen) return;
@@ -118,14 +125,18 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     }
   };
 
-  // Touch Swipe on word card
+  // Touch Swipe on word card (DISABLED while dragging red sheet or touching inside sheet)
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (isDraggingSheet) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.red-sheet-drag-area')) return;
+
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartRef.current) return;
+    if (isDraggingSheet || !touchStartRef.current) return;
     const touch = e.changedTouches[0];
     const dx = touch.clientX - touchStartRef.current.x;
     const dy = touch.clientY - touchStartRef.current.y;
@@ -151,29 +162,48 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     }
   };
 
-  // Red sheet vertical dragging
-  const handleSheetTouchStart = (e: React.TouchEvent) => {
+  // Robust Red Sheet Vertical Dragging via Pointer Events + Pointer Capture
+  const handleSheetPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Only handle primary pointer (left click or first touch finger)
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.preventDefault();
     e.stopPropagation();
-    const touch = e.touches[0];
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
+    setIsDraggingSheet(true);
     sheetDragStartRef.current = {
-      startY: touch.clientY,
+      startY: e.clientY,
       startPercent: redSheetOffsetPercent,
     };
   };
 
-  const handleSheetTouchMove = (e: React.TouchEvent) => {
+  const handleSheetPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!sheetDragStartRef.current) return;
+    e.preventDefault();
     e.stopPropagation();
-    const touch = e.touches[0];
-    const deltaY = touch.clientY - sheetDragStartRef.current.startY;
-    const containerHeight = 450; // estimate
+
+    const deltaY = e.clientY - sheetDragStartRef.current.startY;
+    const containerHeight = cardRef.current?.clientHeight || 450;
     const deltaPercent = (deltaY / containerHeight) * 100;
     const nextPercent = Math.min(Math.max(0, sheetDragStartRef.current.startPercent + deltaPercent), 90);
     setRedSheetOffsetPercent(nextPercent);
   };
 
-  const handleSheetTouchEnd = () => {
-    sheetDragStartRef.current = null;
+  const handleSheetPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (sheetDragStartRef.current) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      sheetDragStartRef.current = null;
+    }
+    setIsDraggingSheet(false);
   };
 
   // Text masking with Red Sheet:
@@ -213,7 +243,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
           if (isHidden) {
             // When covered by Red Sheet:
-            // The text is rendered in matching pure red on a solid red bar, so looking through the red sheet makes it disappear!
+            // Rendered in matching pure red on a solid red bar, so looking through the red sheet makes it disappear!
             return (
               <span
                 key={idx}
@@ -229,7 +259,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           return (
             <span
               key={idx}
-              className="text-[#E11D48] font-semibold border-b border-dashed border-[#E11D48]/40 px-0.5"
+              className="text-[#E11D48] font-semibold border-b border-dashed border-[#E11D48]/50 px-0.5"
             >
               {char}
             </span>
@@ -241,7 +271,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
   // Font size multiplier
   const fontSizeClass = {
-    sm: 'text-2xl',
+    sm: 'text-2xl sm:text-3xl',
     md: 'text-3xl sm:text-4xl',
     lg: 'text-4xl sm:text-5xl',
   }[settings.fontSize || 'md'];
@@ -249,20 +279,23 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#F5F2EA] text-[#2C2825] select-none pb-safe">
       {/* 1. Top Bar */}
-      <header className="sticky top-0 z-30 bg-[#F5F2EA]/95 backdrop-blur-md border-b border-[#E6E0CF] px-3 py-2.5 pt-safe">
+      <header className="sticky top-0 z-30 bg-[#F5F2EA]/95 backdrop-blur-md border-b border-[#E6E0CF] px-3 py-2 pt-safe">
         <div className="max-w-md mx-auto flex items-center justify-between">
           {/* Back button */}
           <button
             onClick={onBack}
-            className="p-1 -ml-1 text-[#524A42] hover:text-[#2C2825] rounded-xl transition min-w-[40px] min-h-[40px] flex items-center justify-center active:scale-95"
+            className="p-1 -ml-1 text-[#524A42] hover:text-[#2C2825] rounded-xl transition min-w-[44px] min-h-[44px] flex items-center justify-center active:scale-95"
             aria-label="Chapter一覧に戻る"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
 
-          {/* Chapter Title */}
-          <div className="text-center overflow-hidden px-2 flex-1">
-            <h1 className="text-xs font-bold text-[#2C2825] truncate">
+          {/* Chapter Title & Number (Priority hierarchy) */}
+          <div className="text-center overflow-hidden px-2 flex-1 min-w-0">
+            <div className="text-[10px] font-bold text-[#E11D48] tracking-widest uppercase">
+              {chapterNumLabel}
+            </div>
+            <h1 className="text-xs sm:text-sm font-bold text-[#2C2825] truncate">
               {chapter.title}
             </h1>
           </div>
@@ -274,13 +307,13 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                 setJumpTargetInput(String(currentIndex + 1));
                 setJumpOpen(true);
               }}
-              className="px-2.5 py-1 rounded-lg bg-[#EAE3D2] hover:bg-[#DDD4C1] text-xs font-bold text-[#524A42] transition active:scale-95 shrink-0 flex items-center gap-1"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#EAE3D2]/80 hover:bg-[#DDD4C1] text-xs font-bold text-[#2C2825] transition active:scale-95 shrink-0 min-h-[36px]"
               title="単語番号を指定してジャンプ"
               aria-label="ページジャンプ"
             >
-              <span className="text-[#2C2825]">{currentIndex + 1}</span>
-              <span className="text-[#8C8275]">/</span>
-              <span className="text-[#8C8275]">{words.length}</span>
+              <span className="font-mono text-xs text-[#2C2825]">{currentIndex + 1}</span>
+              <span className="text-[#9E9487] font-normal">/</span>
+              <span className="font-mono text-xs text-[#7A7167]">{words.length}</span>
             </button>
           )}
         </div>
@@ -303,7 +336,10 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
             {/* Paper Card Main Container */}
             <div
-              className={`w-full min-h-[440px] max-h-[70vh] rounded-3xl bg-[#FFFDF8] border border-[#E5DEC9] p-6 shadow-md flex flex-col justify-between relative overflow-y-auto transition-transform duration-150 ${
+              ref={cardRef}
+              className={`w-full min-h-[440px] max-h-[70vh] rounded-3xl bg-[#FFFDF8] border border-[#E5DEC9] p-6 shadow-md flex flex-col justify-between relative transition-transform duration-150 ${
+                isDraggingSheet ? 'overflow-hidden touch-none' : 'overflow-y-auto'
+              } ${
                 swipeDirection === 'left'
                   ? '-translate-x-4 opacity-70'
                   : swipeDirection === 'right'
@@ -311,86 +347,96 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                   : 'translate-x-0 opacity-100'
               } ${settings.paperTexture ? 'paper-card-ruled' : ''}`}
             >
-              {/* Paper top metadata: Part of speech + Pronunciation */}
+              {/* Card Content Top to Bottom */}
               <div>
-                <div className="flex items-center justify-between text-xs text-[#7A7167] pb-3 border-b border-[#EFE8D8]">
-                  <div className="flex items-center gap-2">
+                {/* 1. Metadata Header: Part of speech + Pronunciation + Favorite */}
+                <div className="flex items-center justify-between text-xs pb-3 border-b border-[#EFE8D8]">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {currentWord.partOfSpeech && (
-                      <span className="font-semibold text-[#524A42]">
-                        [{currentWord.partOfSpeech}]
+                      <span className="text-[11px] font-semibold text-[#6B6257] bg-[#F2ECE1] px-2 py-0.5 rounded-md">
+                        {currentWord.partOfSpeech}
                       </span>
                     )}
                     {currentWord.pronunciation && (
-                      <span className="font-mono text-[11px] text-[#786F66]">
+                      <span className="font-mono text-xs text-[#8C8275] tracking-wide">
                         {currentWord.pronunciation}
                       </span>
                     )}
                   </div>
 
                   {currentWord.favorite && (
-                    <span className="text-amber-500 flex items-center gap-0.5 text-xs font-bold">
-                      <Star className="w-3.5 h-3.5 fill-amber-400 stroke-amber-500" />
+                    <span className="text-amber-500 flex items-center gap-0.5 text-xs font-bold shrink-0">
+                      <Star className="w-4 h-4 fill-amber-400 stroke-amber-500" />
                     </span>
                   )}
                 </div>
 
-                {/* English Word (Main Hero) */}
-                <div className="py-4">
+                {/* 2. English Word (Dominant Focal Point) */}
+                <div className="py-5 my-1">
                   <h2
-                    className={`${fontSizeClass} font-extrabold tracking-tight text-[#2C2825] font-serif leading-tight break-words`}
+                    className={`${fontSizeClass} font-black tracking-tight text-[#1F1C1A] font-serif leading-tight break-words`}
                   >
                     {renderMaskedText('word', currentWord.word)}
                   </h2>
                 </div>
 
-                {/* Meanings */}
+                {/* 3. Meanings (Clear Numerical Hierarchy) */}
                 {currentWord.meanings && currentWord.meanings.length > 0 && (
-                  <div className="space-y-1.5 py-2">
+                  <div className="space-y-2 py-1">
                     {currentWord.meanings.map((meaning, idx) => (
                       <div
                         key={idx}
-                        className="text-base text-[#2C2825] font-bold leading-relaxed flex items-start gap-1.5"
+                        className="text-[15px] sm:text-base text-[#2C2825] font-bold leading-relaxed flex items-start gap-2.5"
                       >
-                        {currentWord.meanings.length > 1 && (
-                          <span className="text-xs font-bold text-[#8C8275] mt-1 shrink-0">
-                            {idx + 1}.
-                          </span>
-                        )}
-                        <div>{renderMaskedText('meaning', meaning, idx)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Examples */}
-                {currentWord.examples && currentWord.examples.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-[#EFE8D8] space-y-3">
-                    {currentWord.examples.map((ex, idx) => (
-                      <div key={idx} className="space-y-1 text-xs">
-                        <div className="text-[#38332D] font-medium leading-relaxed italic">
-                          {renderMaskedText('example', ex.text, undefined, idx, 'text')}
+                        <span className="w-5 h-5 rounded-md bg-[#F2EDE2] text-[#7A7167] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1">
+                          {renderMaskedText('meaning', meaning, idx)}
                         </div>
-                        {ex.translation && (
-                          <div className="text-[#7A7167] leading-relaxed">
-                            {renderMaskedText(
-                              'example',
-                              ex.translation,
-                              undefined,
-                              idx,
-                              'translation'
-                            )}
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Memo */}
+                {/* 4. Examples (Subordinate Visual Tier) */}
+                {currentWord.examples && currentWord.examples.length > 0 && (
+                  <div className="mt-5 pt-4 border-t border-[#EFE8D8]">
+                    <div className="text-[10px] font-bold text-[#9E9487] tracking-wider uppercase mb-2.5">
+                      例文
+                    </div>
+                    <div className="space-y-3">
+                      {currentWord.examples.map((ex, idx) => (
+                        <div key={idx} className="space-y-1">
+                          <div className="text-xs sm:text-[13px] text-[#2C2825] font-medium leading-relaxed">
+                            {renderMaskedText('example', ex.text, undefined, idx, 'text')}
+                          </div>
+                          {ex.translation && (
+                            <div className="text-[11px] sm:text-xs text-[#7A7167] leading-relaxed pl-2.5 border-l-2 border-[#E5DEC9]">
+                              {renderMaskedText(
+                                'example',
+                                ex.translation,
+                                undefined,
+                                idx,
+                                'translation'
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Memo (Personal Handwritten Annotation Feel) */}
                 {currentWord.memo && (
-                  <div className="mt-4 pt-3 border-t border-[#EFE8D8] text-xs text-[#6B6257] leading-relaxed bg-[#FAF6EE] p-3 rounded-xl">
-                    <span className="font-bold text-[#524A42] mr-1">メモ:</span>
-                    {currentWord.memo}
+                  <div className="mt-4 pt-3 border-t border-[#EFE8D8]">
+                    <div className="bg-[#FAF5EC] border border-[#EBE3D3] rounded-xl p-3 text-xs text-[#524A42] leading-relaxed">
+                      <div className="text-[10px] font-bold text-[#8C8275] tracking-wide mb-1 flex items-center gap-1">
+                        <span>✏️ メモ</span>
+                      </div>
+                      <div>{currentWord.memo}</div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -415,61 +461,82 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
             {/* Red Sheet Draggable Translucent Plastic Overlay */}
             {redSheetActive && (
               <div
-                className="absolute inset-0 z-30 rounded-3xl overflow-hidden pointer-events-auto transition-transform duration-75 flex flex-col"
+                className="red-sheet-drag-area absolute inset-0 z-30 rounded-3xl overflow-hidden pointer-events-auto transition-transform duration-75 flex flex-col touch-none select-none"
                 style={{
                   transform: `translateY(${redSheetOffsetPercent}%)`,
-                  backgroundColor: 'rgba(225, 29, 72, 0.78)',
+                  backgroundColor: 'rgba(225, 29, 72, 0.82)',
                   boxShadow: '0 8px 30px rgba(190, 18, 60, 0.35)',
+                  touchAction: 'none',
                 }}
               >
                 {/* Red sheet top drag bar / handle */}
                 <div
-                  className="bg-[#BE123C] text-white px-4 py-2.5 flex items-center justify-between cursor-grab active:cursor-grabbing border-b border-white/20 select-none shadow-xs"
-                  onTouchStart={handleSheetTouchStart}
-                  onTouchMove={handleSheetTouchMove}
-                  onTouchEnd={handleSheetTouchEnd}
+                  className="bg-[#BE123C] text-white px-4 py-2 flex items-center justify-between cursor-grab active:cursor-grabbing border-b border-white/20 select-none shadow-xs touch-none"
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={handleSheetPointerDown}
+                  onPointerMove={handleSheetPointerMove}
+                  onPointerUp={handleSheetPointerUp}
+                  onPointerCancel={handleSheetPointerUp}
                 >
-                  <div className="flex items-center gap-2">
-                    <MoveVertical className="w-4 h-4 text-white/80" />
-                    <span className="text-xs font-bold tracking-wide">
-                      🟥 赤シート (上下にドラッグ)
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-white/90" />
+                    <span className="text-xs font-bold tracking-wide text-white">
+                      赤シート
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {/* Peek button */}
+                  {/* Tactile Grab Indicator Bar in Center */}
+                  <div className="flex items-center gap-1 px-3 py-1">
+                    <div className="w-10 h-1.5 rounded-full bg-white/60" />
+                    {isDraggingSheet && (
+                      <span className="text-[10px] text-white/90 font-medium ml-1 animate-pulse">
+                        ↕ 移動中
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* Minimal Peek Button */}
                     <button
                       type="button"
                       onMouseDown={() => setIsPeeking(true)}
                       onMouseUp={() => setIsPeeking(false)}
-                      onTouchStart={() => setIsPeeking(true)}
-                      onTouchEnd={() => setIsPeeking(false)}
-                      className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold text-white transition active:scale-95"
+                      onTouchStart={(e) => {
+                        e.stopPropagation();
+                        setIsPeeking(true);
+                      }}
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        setIsPeeking(false);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold text-white transition active:scale-95 min-h-[32px] flex items-center"
                     >
-                      {isPeeking ? '透かし中' : '押して透かす'}
+                      {isPeeking ? '透かし中' : '透かす'}
                     </button>
-                    {/* Quick pull down */}
+
+                    {/* Quick pull down / reset */}
                     <button
                       type="button"
                       onClick={() =>
                         setRedSheetOffsetPercent(redSheetOffsetPercent > 30 ? 0 : 75)
                       }
-                      className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold text-white transition active:scale-95"
+                      className="px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold text-white transition active:scale-95 min-h-[32px]"
+                      title={redSheetOffsetPercent > 30 ? '戻す' : '下げる'}
                     >
-                      {redSheetOffsetPercent > 30 ? '戻す' : '下げる'}
+                      {redSheetOffsetPercent > 30 ? '全戻し' : '下げる'}
                     </button>
                   </div>
                 </div>
 
-                {/* Translucent body showing through with red filter */}
+                {/* Translucent body (Clean, no distracting center watermark) */}
                 <div
-                  className="flex-1 flex items-center justify-center pointer-events-none p-4"
-                  onClick={() => setIsPeeking(!isPeeking)}
-                >
-                  <div className="text-white/40 text-xs font-bold tracking-widest text-center">
-                    KOTOBA RED SHEET
-                  </div>
-                </div>
+                  className="flex-1 touch-none"
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={handleSheetPointerDown}
+                  onPointerMove={handleSheetPointerMove}
+                  onPointerUp={handleSheetPointerUp}
+                  onPointerCancel={handleSheetPointerUp}
+                />
               </div>
             )}
           </div>
@@ -495,8 +562,8 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
         )}
       </main>
 
-      {/* 3. Bottom Toolbar (Replaces normal bottom nav on word page) */}
-      <footer className="sticky bottom-0 z-30 bg-[#FAF7F0]/95 backdrop-blur-md border-t border-[#E8E2D2] px-4 py-2.5 pb-safe">
+      {/* 3. Bottom Toolbar (Refined, quiet, perfectly proportioned for mobile) */}
+      <footer className="sticky bottom-0 z-30 bg-[#FAF7F0]/95 backdrop-blur-md border-t border-[#E8E2D2] px-4 py-2 pb-safe">
         <div className="max-w-md mx-auto grid grid-cols-4 items-center gap-1">
           {/* 🟥 赤シート */}
           <button
@@ -504,15 +571,23 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
               setRedSheetActive(!redSheetActive);
               setRedSheetOffsetPercent(0);
             }}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition min-h-[48px] active:scale-95 ${
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[48px] active:scale-95 ${
               redSheetActive
-                ? 'bg-rose-100 text-[#E11D48] font-bold shadow-xs'
-                : 'text-[#6B6257] hover:bg-[#F2ECE1]'
+                ? 'text-[#E11D48] font-bold'
+                : 'text-[#6B6257] hover:bg-[#F2ECE1]/60'
             }`}
             aria-label="赤シート切替"
           >
-            <span className="text-base leading-none">🟥</span>
-            <span className="text-[10px] tracking-tight mt-1">
+            <div
+              className={`w-6 h-5 rounded-md flex items-center justify-center text-[10px] font-bold border transition ${
+                redSheetActive
+                  ? 'bg-[#E11D48] text-white border-[#BE123C] shadow-xs'
+                  : 'bg-rose-50 text-[#E11D48] border-rose-200'
+              }`}
+            >
+              赤
+            </div>
+            <span className="text-[10px] tracking-tight mt-1 font-medium">
               {redSheetActive ? '赤シート中' : '赤シート'}
             </span>
           </button>
@@ -521,7 +596,6 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           <button
             onClick={() => {
               if (currentWord) {
-                // Focus on sticky note creation
                 const sampleNewNote: StickyNote = {
                   id: `sticky-${Date.now()}`,
                   wordId: currentWord.id,
@@ -534,12 +608,19 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
               }
             }}
             disabled={!currentWord}
-            className="flex flex-col items-center justify-center py-1.5 rounded-xl text-[#6B6257] hover:bg-[#F2ECE1] transition min-h-[48px] disabled:opacity-30 active:scale-95"
+            className="flex flex-col items-center justify-center py-1 rounded-xl text-[#6B6257] hover:bg-[#F2ECE1]/60 transition min-h-[48px] disabled:opacity-30 active:scale-95"
             aria-label="付箋を貼る"
           >
-            <span className="text-base leading-none">🟨</span>
-            <span className="text-[10px] tracking-tight mt-1">
-              付箋 ({currentWordNotes.length})
+            <div className="relative">
+              <StickyIcon className="w-5 h-5 text-amber-500 fill-amber-100 stroke-[1.8]" />
+              {currentWordNotes.length > 0 && (
+                <span className="absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                  {currentWordNotes.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] tracking-tight mt-1 font-medium">
+              付箋
             </span>
           </button>
 
@@ -551,20 +632,20 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
               }
             }}
             disabled={!currentWord}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition min-h-[48px] disabled:opacity-30 active:scale-95 ${
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[48px] disabled:opacity-30 active:scale-95 ${
               currentWord?.favorite
                 ? 'text-amber-500 font-bold'
-                : 'text-[#6B6257] hover:bg-[#F2ECE1]'
+                : 'text-[#6B6257] hover:bg-[#F2ECE1]/60'
             }`}
             aria-label="お気に入り切替"
           >
             <Star
               className={`w-5 h-5 ${
-                currentWord?.favorite ? 'fill-amber-400 stroke-amber-500' : 'stroke-[1.8]'
+                currentWord?.favorite ? 'fill-amber-400 stroke-amber-500' : 'text-[#7A7167] stroke-[1.8]'
               }`}
             />
-            <span className="text-[10px] tracking-tight mt-1">
-              {currentWord?.favorite ? 'お気に入り' : '☆ お気に入り'}
+            <span className="text-[10px] tracking-tight mt-1 font-medium">
+              お気に入り
             </span>
           </button>
 
@@ -577,11 +658,11 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                 setIsAdding(true);
               }
             }}
-            className="flex flex-col items-center justify-center py-1.5 rounded-xl text-[#6B6257] hover:bg-[#F2ECE1] transition min-h-[48px] active:scale-95"
+            className="flex flex-col items-center justify-center py-1 rounded-xl text-[#6B6257] hover:bg-[#F2ECE1]/60 transition min-h-[48px] active:scale-95"
             aria-label="単語を編集"
           >
-            <Edit3 className="w-5 h-5 stroke-[1.8]" />
-            <span className="text-[10px] tracking-tight mt-1">
+            <Edit3 className="w-5 h-5 text-[#7A7167] stroke-[1.8]" />
+            <span className="text-[10px] tracking-tight mt-1 font-medium">
               {currentWord ? '編集' : '単語追加'}
             </span>
           </button>
