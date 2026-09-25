@@ -1,0 +1,6 @@
+{
+  "name": "KOTOBA",
+  "description": "KOTOBA — 自分で育てる英単語帳。紙の英単語帳のめくる感覚と赤シート・付箋を再現したスマートフォン専用英単語帳アプリ。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --paper-bg: #FDFBF7;
+    --paper-border: #E8E2D2;
+    --paper-ruled: #ECE6D5;
+    --paper-shadow: rgba(44, 40, 37, 0.08);
+    --ink-primary: #2C2825;
+    --ink-secondary: #6B6257;
+    --ink-muted: #9E9487;
+    --accent-red: #E11D48;
+  }
+
+  body {
+    background-color: #F5F2EA;
+    color: var(--ink-primary);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* Paper texture and tactile styles */
+.paper-card {
+  background-color: var(--paper-bg);
+  border: 1px solid var(--paper-border);
+  box-shadow: 0 4px 16px -2px var(--paper-shadow), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+}
+
+.paper-card-ruled {
+  background-color: var(--paper-bg);
+  background-image: linear-gradient(var(--paper-ruled) 1px, transparent 1px);
+  background-size: 100% 28px;
+}
+
+.paper-grid {
+  background-size: 20px 20px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+
+/* Sticky notes */
+.sticky-note-shadow {
+  box-shadow: 2px 3px 8px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Safe area insets */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pb-safe-nav {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4.5rem);
+}
+
+/* Custom scrollbar for paper feel */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(107, 98, 87, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 98, 87, 0.4);
+}
