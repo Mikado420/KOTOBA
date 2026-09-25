@@ -5,7 +5,11 @@ import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
+  const base = process.env.BASE_URL || (isGitHubActions ? '/KOTOBA/' : '/');
+
   return {
+    base,
     plugins: [
       react(),
       tailwindcss(),
@@ -13,30 +17,30 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['apple-touch-icon.png', 'icon.svg'],
         manifest: {
-          id: '/',
+          id: base,
           name: 'KOTOBA — 自分で育てる英単語帳',
           short_name: 'KOTOBA',
           description: '紙の英単語帳のめくる感覚と赤シート・付箋を再現したスマートフォン専用英単語帳アプリ。',
           theme_color: '#FAF7F0',
           background_color: '#FAF7F0',
           display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          start_url: base,
+          scope: base,
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: `${base}pwa-192x192.png`,
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: `${base}pwa-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: `${base}pwa-maskable-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -84,7 +88,7 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname || '.', '.'),
       },
     },
     server: {
