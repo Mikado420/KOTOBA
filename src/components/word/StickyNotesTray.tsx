@@ -8,6 +8,7 @@ interface StickyNotesTrayProps {
   wordId: string;
   onSaveNote: (note: StickyNote) => void;
   onDeleteNote: (noteId: string) => void;
+  onOpenCreate?: () => void;
 }
 
 const COLOR_MAP: Record<StickyColor, { bg: string; border: string; tabBg: string; text: string; name: string }> = {
@@ -26,6 +27,7 @@ export const StickyNotesTray: React.FC<StickyNotesTrayProps> = ({
   wordId,
   onSaveNote,
   onDeleteNote,
+  onOpenCreate,
 }) => {
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -123,7 +125,13 @@ export const StickyNotesTray: React.FC<StickyNotesTrayProps> = ({
 
         {/* Small + Add Sticky Tab */}
         <button
-          onClick={startCreate}
+          onClick={() => {
+            if (onOpenCreate) {
+              onOpenCreate();
+            } else {
+              startCreate();
+            }
+          }}
           className="h-7 w-7 rounded-r-md bg-[#2C2825] text-white text-xs font-bold shadow-md hover:bg-black active:scale-95 flex items-center justify-center border-y border-r border-black/15 transition-transform"
           title="付箋を貼る"
           aria-label="付箋を貼る"
@@ -281,6 +289,30 @@ export const StickyNotesTray: React.FC<StickyNotesTrayProps> = ({
                   {activeNote.body}
                 </p>
               )}
+
+              {/* Color switcher */}
+              <div className="mt-2.5 pt-2 border-t border-black/10 flex items-center justify-between">
+                <span className="text-[10px] font-bold opacity-75">色を変更:</span>
+                <div className="flex items-center gap-1.5">
+                  {STICKY_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => {
+                        onSaveNote({ ...activeNote, color: c });
+                      }}
+                      style={{ backgroundColor: COLOR_MAP[c].tabBg }}
+                      className={`w-5 h-5 rounded-full border border-black/10 flex items-center justify-center transition active:scale-90 ${
+                        activeNote.color === c ? 'ring-2 ring-black/40 scale-110 shadow-2xs' : 'opacity-70 hover:opacity-100'
+                      }`}
+                      title={COLOR_MAP[c].name}
+                      aria-label={COLOR_MAP[c].name}
+                    >
+                      {activeNote.color === c && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {/* Action: Peel off prompt */}
               <div className="mt-2 pt-2 border-t border-black/10 flex items-center justify-between text-[10px] opacity-75">

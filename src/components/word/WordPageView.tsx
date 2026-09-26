@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Word, Chapter, StickyNote, AppSettings, RedSheetRange } from '../../types';
 import { StickyNotesTray } from './StickyNotesTray';
+import { StickyNoteCreateModal } from './StickyNoteCreateModal';
 import { WordEditModal } from './WordEditModal';
 import {
   ChevronLeft,
@@ -53,6 +54,9 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Edit modal
   const [isEditing, setIsEditing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+
+  // Sticky note create modal (color picker)
+  const [stickyCreateModalOpen, setStickyCreateModalOpen] = useState(false);
 
   // Jump to word dialog
   const [jumpOpen, setJumpOpen] = useState(false);
@@ -689,6 +693,11 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                   wordId={currentWord.id}
                   onSaveNote={onSaveStickyNote}
                   onDeleteNote={onDeleteStickyNote}
+                  onOpenCreate={() => {
+                    if (currentWord) {
+                      setStickyCreateModalOpen(true);
+                    }
+                  }}
                 />
               </div>
             )}
@@ -853,15 +862,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           <button
             onClick={() => {
               if (currentWord) {
-                const sampleNewNote: StickyNote = {
-                  id: `sticky-${Date.now()}`,
-                  wordId: currentWord.id,
-                  color: 'yellow',
-                  title: '',
-                  body: '',
-                  createdAt: Date.now(),
-                };
-                onSaveStickyNote(sampleNewNote);
+                setStickyCreateModalOpen(true);
               }
             }}
             disabled={!currentWord}
@@ -963,6 +964,23 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Sticky Note Create / Color Selection Modal */}
+      <StickyNoteCreateModal
+        isOpen={stickyCreateModalOpen}
+        onClose={() => setStickyCreateModalOpen(false)}
+        onConfirm={(color) => {
+          if (currentWord) {
+            const newNote: StickyNote = {
+              id: `sticky-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              wordId: currentWord.id,
+              color,
+              createdAt: Date.now(),
+            };
+            onSaveStickyNote(newNote);
+          }
+        }}
+      />
 
       {/* Word Edit / Add Modal */}
       <WordEditModal

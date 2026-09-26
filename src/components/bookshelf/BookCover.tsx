@@ -95,7 +95,7 @@ export const BookItem: React.FC<BookItemProps> = ({
             <div className="flex items-center gap-3 text-xs text-white/80 font-medium">
               <span className="flex items-center gap-1">
                 <Layers className="w-3.5 h-3.5 opacity-80" />
-                {chapterCount} Chapter
+                {chapterCount}章
               </span>
               <span className="opacity-40">·</span>
               <span className="flex items-center gap-1">
