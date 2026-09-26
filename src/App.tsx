@@ -21,6 +21,7 @@ import { WordPageView } from './components/word/WordPageView';
 import { ReviewHomeView } from './components/review/ReviewHomeView';
 import { ReviewSessionView } from './components/review/ReviewSessionView';
 import { SettingsView } from './components/settings/SettingsView';
+import { PWAUpdateToast } from './components/pwa/PWAUpdateToast';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -405,11 +406,14 @@ export default function App() {
   // Active Review Flow
   if (activeReviewWords) {
     return (
-      <ReviewSessionView
-        words={activeReviewWords}
-        onFinishSession={handleFinishReviewSession}
-        onExit={() => setActiveReviewWords(null)}
-      />
+      <>
+        <PWAUpdateToast />
+        <ReviewSessionView
+          words={activeReviewWords}
+          onFinishSession={handleFinishReviewSession}
+          onExit={() => setActiveReviewWords(null)}
+        />
+      </>
     );
   }
 
@@ -421,20 +425,23 @@ export default function App() {
       : chapters;
 
     return (
-      <WordPageView
-        chapter={selectedChapter}
-        chapters={bookChapters}
-        words={chapterWords}
-        initialWordIndex={selectedWordIndex}
-        stickyNotes={stickyNotes}
-        settings={settings}
-        onBack={() => setSelectedChapter(null)}
-        onSaveWord={handleSaveWord}
-        onDeleteWord={handleDeleteWord}
-        onSaveStickyNote={handleSaveStickyNote}
-        onDeleteStickyNote={handleDeleteStickyNote}
-        onToggleFavorite={handleToggleFavorite}
-      />
+      <>
+        <PWAUpdateToast />
+        <WordPageView
+          chapter={selectedChapter}
+          chapters={bookChapters}
+          words={chapterWords}
+          initialWordIndex={selectedWordIndex}
+          stickyNotes={stickyNotes}
+          settings={settings}
+          onBack={() => setSelectedChapter(null)}
+          onSaveWord={handleSaveWord}
+          onDeleteWord={handleDeleteWord}
+          onSaveStickyNote={handleSaveStickyNote}
+          onDeleteStickyNote={handleDeleteStickyNote}
+          onToggleFavorite={handleToggleFavorite}
+        />
+      </>
     );
   }
 
@@ -443,6 +450,7 @@ export default function App() {
     const bookChapters = chapters.filter((c) => c.bookId === selectedBook.id);
     return (
       <div className="min-h-screen bg-[#F5F2EA]">
+        <PWAUpdateToast />
         <ChapterListView
           book={selectedBook}
           chapters={bookChapters}
@@ -473,6 +481,7 @@ export default function App() {
   // Main Tabs: Bookshelf, Review, Settings
   return (
     <div className="min-h-screen bg-[#F5F2EA] text-[#2C2825]">
+      <PWAUpdateToast />
       {activeTab === 'bookshelf' && (
         <BookshelfView
           books={books}

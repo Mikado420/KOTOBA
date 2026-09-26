@@ -10,18 +10,17 @@ interface StickyNoteCreateModalProps {
 
 export const STICKY_COLOR_OPTIONS: {
   color: StickyColor;
-  name: string;
   bg: string;
   tabBg: string;
   border: string;
   text: string;
 }[] = [
-  { color: 'red', name: '赤', bg: '#FFE4E6', tabBg: '#FB7185', border: '#FDA4AF', text: '#881337' },
-  { color: 'orange', name: 'オレンジ', bg: '#FFEDD5', tabBg: '#FB923C', border: '#FDBA74', text: '#7C2D12' },
-  { color: 'yellow', name: '黄色', bg: '#FEF9C3', tabBg: '#FACC15', border: '#FDE047', text: '#713F12' },
-  { color: 'green', name: '緑', bg: '#DCFCE7', tabBg: '#4ADE80', border: '#86EFAC', text: '#14532D' },
-  { color: 'blue', name: '青', bg: '#DBEAFE', tabBg: '#60A5FA', border: '#93C5FD', text: '#1E3A8A' },
-  { color: 'purple', name: '紫', bg: '#F3E8FF', tabBg: '#C084FC', border: '#D8B4FE', text: '#581C87' },
+  { color: 'red', bg: '#FFE4E6', tabBg: '#FB7185', border: '#FDA4AF', text: '#881337' },
+  { color: 'orange', bg: '#FFEDD5', tabBg: '#FB923C', border: '#FDBA74', text: '#7C2D12' },
+  { color: 'yellow', bg: '#FEF9C3', tabBg: '#FACC15', border: '#FDE047', text: '#713F12' },
+  { color: 'green', bg: '#DCFCE7', tabBg: '#4ADE80', border: '#86EFAC', text: '#14532D' },
+  { color: 'blue', bg: '#DBEAFE', tabBg: '#60A5FA', border: '#93C5FD', text: '#1E3A8A' },
+  { color: 'purple', bg: '#F3E8FF', tabBg: '#C084FC', border: '#D8B4FE', text: '#581C87' },
 ];
 
 export const StickyNoteCreateModal: React.FC<StickyNoteCreateModalProps> = ({
@@ -51,7 +50,7 @@ export const StickyNoteCreateModal: React.FC<StickyNoteCreateModalProps> = ({
         <div className="flex items-center justify-between pb-2 border-b border-[#EAE3D2]">
           <div className="flex items-center gap-2">
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-2xs"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-2xs transition-colors"
               style={{ backgroundColor: currentOption.tabBg }}
             >
               <StickyIcon className="w-4 h-4 fill-white/30 stroke-white" />
@@ -71,8 +70,8 @@ export const StickyNoteCreateModal: React.FC<StickyNoteCreateModalProps> = ({
           </button>
         </div>
 
-        {/* 6 Colors Selection Grid */}
-        <div className="grid grid-cols-3 gap-2.5">
+        {/* 6 Colors Selection Row (Strictly 1 horizontal row across all screen sizes, no color names) */}
+        <div className="grid grid-cols-6 gap-2 w-full pt-1">
           {STICKY_COLOR_OPTIONS.map((item) => {
             const isSelected = selectedColor === item.color;
             return (
@@ -81,45 +80,37 @@ export const StickyNoteCreateModal: React.FC<StickyNoteCreateModalProps> = ({
                 type="button"
                 onClick={() => setSelectedColor(item.color)}
                 style={{
-                  backgroundColor: isSelected ? item.bg : '#FAF7F0',
-                  borderColor: isSelected ? item.tabBg : '#E8E2D2',
+                  backgroundColor: item.tabBg,
                 }}
-                className={`relative flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all min-h-[46px] active:scale-95 text-left ${
+                className={`aspect-square w-full rounded-xl border border-black/15 flex items-center justify-center transition-all duration-150 active:scale-90 shadow-2xs ${
                   isSelected
-                    ? 'ring-2 ring-offset-1 shadow-xs font-bold'
-                    : 'hover:bg-white/80 opacity-90'
+                    ? 'ring-3 ring-[#2C2825] ring-offset-2 scale-105 shadow-md'
+                    : 'hover:scale-102 opacity-85 hover:opacity-100'
                 }`}
-                style-ring-color={item.tabBg}
+                aria-label={`付箋カラー ${item.color}`}
               >
-                {/* Physical Tab Color Dot */}
-                <span
-                  className="w-4 h-4 rounded-md shrink-0 border border-black/10 shadow-2xs flex items-center justify-center text-white"
-                  style={{ backgroundColor: item.tabBg }}
-                >
-                  {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                </span>
-                <span className="text-xs text-[#2C2825] font-medium leading-none">
-                  {item.name}
-                </span>
+                {isSelected && (
+                  <Check className="w-4 h-4 text-white stroke-[3.5] drop-shadow-xs" />
+                )}
               </button>
             );
           })}
         </div>
 
-        {/* Tactile Preview: visual representation of the sticky note tab on the paper edge */}
+        {/* Tactile Preview: visual representation of the sticky note tab on the paper card edge */}
         <div className="bg-[#FAF7F0] border border-[#EAE3D2] rounded-xl p-3 flex items-center justify-between">
-          <div className="text-[11px] text-[#7A7167]">
-            <span>プレビュー: </span>
-            <span className="font-bold text-[#211E1C]">{currentOption.name}の付箋</span>
-          </div>
+          <span className="text-[11px] font-medium text-[#7A7167]">プレビュー</span>
 
-          {/* Mini Tab Preview */}
+          {/* Mini Word Card Edge Preview */}
           <div className="flex items-center">
+            <div className="h-7 px-3 bg-[#FFFDF8] border-y border-l border-[#E5DEC9] rounded-l-md flex items-center">
+              <span className="text-[9px] text-[#A89F91]">カード右端</span>
+            </div>
             <div
-              className="h-6 px-3 rounded-r-md text-[10px] font-bold text-white shadow-xs flex items-center gap-1 border-y border-r border-black/10"
+              className="h-7 px-3 rounded-r-md text-[10px] font-bold text-white shadow-xs flex items-center border-y border-r border-black/15 transition-colors"
               style={{ backgroundColor: currentOption.tabBg }}
             >
-              <span>付箋</span>
+              付箋
             </div>
           </div>
         </div>

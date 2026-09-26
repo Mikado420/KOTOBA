@@ -184,7 +184,7 @@ export const WordEditModal: React.FC<WordEditModalProps> = ({
               {chapters.length > 1 && (
                 <div>
                   <label className="block font-semibold text-[#6B6257] mb-1">
-                    登録先Chapter
+                    登録先の章
                   </label>
                   <select
                     value={chapterId}
@@ -193,7 +193,7 @@ export const WordEditModal: React.FC<WordEditModalProps> = ({
                   >
                     {chapters.map((ch, idx) => (
                       <option key={ch.id} value={ch.id}>
-                        Chapter {String(idx + 1).padStart(2, '0')}: {ch.title}
+                        第{idx + 1}章: {ch.title}
                       </option>
                     ))}
                   </select>

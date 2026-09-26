@@ -85,9 +85,9 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     ? stickyNotes.filter((n) => n.wordId === currentWord.id)
     : [];
 
-  // Chapter number calculation (e.g. Chapter 01)
+  // Chapter number calculation (e.g. 第1章)
   const chapterIndex = chapters.findIndex((c) => c.id === chapter.id);
-  const chapterNumLabel = chapterIndex >= 0 ? `Chapter ${String(chapterIndex + 1).padStart(2, '0')}` : 'Chapter';
+  const chapterNumLabel = chapterIndex >= 0 ? `第${chapterIndex + 1}章` : '章';
 
   // Responsive sheet height calculation: ~50-54% of visible card viewport (220px to 340px)
   const calculateSheetHeight = (vpH: number) => {
@@ -504,7 +504,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           <button
             onClick={onBack}
             className="p-1 -ml-1 text-[#524A42] hover:text-[#211E1C] rounded-xl transition min-w-[44px] min-h-[44px] flex items-center justify-center active:scale-95"
-            aria-label="Chapter一覧に戻る"
+            aria-label="章一覧に戻る"
           >
             <ChevronLeft className="w-6 h-6 stroke-[2]" />
           </button>
@@ -814,7 +814,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           /* Empty Chapter Words State */
           <div className="w-full h-full rounded-2xl bg-[#FFFDF8] border border-[#E5DEC9] p-8 shadow-2xs flex flex-col items-center justify-center text-center my-auto">
             <h3 className="text-base font-bold text-[#211E1C]">
-              このChapterにはまだ単語がありません
+              この章にはまだ単語がありません
             </h3>
             <p className="text-xs text-[#7A7167] mt-1.5 leading-relaxed max-w-xs">
               下の「+ 単語を追加」から、最初の単語を登録してみましょう。

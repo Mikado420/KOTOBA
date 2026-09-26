@@ -3,18 +3,19 @@ import { AppSettings, KotobaBackupData } from '../../types';
 import { db } from '../../services/db';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
+import { usePWAUpdate } from '../../hooks/usePWAUpdate';
 import {
   Download,
   Upload,
   FileCheck,
   Type,
-  Layers,
   Palette,
-  Sparkles,
   Info,
   Check,
   AlertTriangle,
-  Smartphone,
+  RefreshCw,
+  RotateCcw,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -31,9 +32,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [backupSuccessMsg, setBackupSuccessMsg] = useState('');
   const [restoreConfirmData, setRestoreConfirmData] = useState<KotobaBackupData | null>(null);
   const [restoreError, setRestoreError] = useState('');
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { isInstallable, isIOS, install } = usePWAInstall();
+  const { updateAvailable, isChecking, checkForUpdate, applyUpdate, forceReload } = usePWAUpdate();
 
   // Export .wordbook file
   const handleExportBackup = async () => {
@@ -109,6 +112,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setTimeout(() => setBackupSuccessMsg(''), 5000);
     } catch (err) {
       alert('復元中にエラーが発生しました。');
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    setUpdateCheckStatus('checking');
+    try {
+      const hasNew = await checkForUpdate();
+      if (hasNew) {
+        setUpdateCheckStatus('update-available');
+      } else {
+        setUpdateCheckStatus('up-to-date');
+        setTimeout(() => setUpdateCheckStatus(''), 4000);
+      }
+    } catch {
+      setUpdateCheckStatus('error');
+      setTimeout(() => setUpdateCheckStatus(''), 4000);
     }
   };
 
@@ -325,19 +344,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           />
         </div>
 
-        {/* 4. アプリ情報 */}
-        <div className="rounded-2xl bg-[#FFFDF8] border border-[#E6E0CF] p-4 shadow-xs space-y-2 text-xs text-[#7A7167]">
+        {/* 4. アプリ情報 & アップデート */}
+        <div className="rounded-2xl bg-[#FFFDF8] border border-[#E6E0CF] p-4 shadow-xs space-y-3 text-xs text-[#7A7167]">
           <div className="flex items-center justify-between font-semibold text-[#2C2825]">
             <span className="flex items-center gap-1.5">
               <Info className="w-4 h-4 text-[#7A7167]" />
               KOTOBA について
             </span>
-            <span className="font-mono text-[11px] text-[#8C8275]">v1.0.0</span>
+            <span className="font-mono text-[11px] text-[#8C8275]">v1.0.1</span>
           </div>
           <p className="leading-relaxed">
             KOTOBAは「自分で育てる英単語帳」をコンセプトにしたスマートフォン向け英単語帳です。
             紙の単語帳のめくる感覚、赤シート、付箋をスマートフォン上に再現しています。
           </p>
+
+          {/* Update controls */}
+          <div className="pt-2 border-t border-[#F2ECE1] space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#2C2825]">アプリの更新</span>
+              <button
+                type="button"
+                onClick={handleCheckUpdate}
+                disabled={isChecking || updateCheckStatus === 'checking'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#DDD6C5] text-xs font-bold text-[#2C2825] hover:bg-[#FAF7F0] transition active:scale-95 shadow-2xs disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${
+                    isChecking || updateCheckStatus === 'checking' ? 'animate-spin' : ''
+                  }`}
+                />
+                <span>
+                  {isChecking || updateCheckStatus === 'checking'
+                    ? '確認中...'
+                    : '最新版を確認'}
+                </span>
+              </button>
+            </div>
+
+            {/* Status messages */}
+            {(updateAvailable || updateCheckStatus === 'update-available') && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[#BE123C] flex items-center justify-between gap-2 animate-in fade-in duration-150">
+                <span className="text-[11px] font-bold">新しいバージョンがあります</span>
+                <button
+                  type="button"
+                  onClick={applyUpdate}
+                  className="px-3 py-1 bg-[#E11D48] text-white text-[11px] font-bold rounded-lg hover:bg-[#BE123C] transition active:scale-95 shadow-xs"
+                >
+                  今すぐ更新
+                </button>
+              </div>
+            )}
+
+            {updateCheckStatus === 'up-to-date' && !updateAvailable && (
+              <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-1.5 text-[11px] font-medium animate-in fade-in duration-150">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>アプリは現在最新バージョンです。</span>
+              </div>
+            )}
+
+            {/* Force reload option */}
+            <div className="pt-1 flex items-center justify-between text-[11px]">
+              <span className="text-[#8C8275]">表示が古いままの場合:</span>
+              <button
+                type="button"
+                onClick={forceReload}
+                className="inline-flex items-center gap-1 text-[#6B6257] hover:text-[#2C2825] underline underline-offset-2 font-medium"
+              >
+                <RotateCcw className="w-3 h-3" />
+                キャッシュを再読み込み
+              </button>
+            </div>
+          </div>
         </div>
       </main>
 
