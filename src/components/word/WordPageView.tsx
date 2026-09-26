@@ -48,6 +48,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   const [isPeeking, setIsPeeking] = useState(false);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
   const [isSheetAtTop, setIsSheetAtTop] = useState(true);
+  const [sheetHeight, setSheetHeight] = useState<number>(270);
 
   // Edit modal
   const [isEditing, setIsEditing] = useState(false);
@@ -63,15 +64,17 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Touch handling refs
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  // DOM Refs for high-performance decoupled physical red sheet
+  // DOM Refs for physical coordinate-based decoupled red sheet
+  const viewportRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+
+  // Y coordinate relative to viewportRef (0 = top flush with card, maxY = bottom flush above toolbar)
   const sheetYRef = useRef<number>(0);
+  const grabOffsetYRef = useRef<number>(0);
   const isDraggingRef = useRef<boolean>(false);
-  const dragStartYRef = useRef<number>(0);
-  const dragStartOffsetYRef = useRef<number>(0);
   const rAFRef = useRef<number | null>(null);
-  const cachedChunksRef = useRef<{ el: HTMLElement; top: number; bottom: number }[]>([]);
+  const cachedChunksRef = useRef<{ el: HTMLElement; screenTop: number; screenBottom: number }[]>([]);
 
   const currentWord = words[currentIndex] || null;
   const currentWordNotes = currentWord
@@ -81,6 +84,27 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Chapter number calculation (e.g. Chapter 01)
   const chapterIndex = chapters.findIndex((c) => c.id === chapter.id);
   const chapterNumLabel = chapterIndex >= 0 ? `Chapter ${String(chapterIndex + 1).padStart(2, '0')}` : 'Chapter';
+
+  // Responsive sheet height calculation: ~50-54% of visible card viewport (220px to 340px)
+  const calculateSheetHeight = (vpH: number) => {
+    return Math.min(Math.max(Math.round(vpH * 0.52), 220), 340);
+  };
+
+  // Update sheet dimensions dynamically on mount and window resize
+  useEffect(() => {
+    const updateDims = () => {
+      if (viewportRef.current) {
+        const vpH = viewportRef.current.clientHeight;
+        if (vpH > 0) {
+          const calculatedH = calculateSheetHeight(vpH);
+          setSheetHeight(calculatedH);
+        }
+      }
+    };
+    updateDims();
+    window.addEventListener('resize', updateDims);
+    return () => window.removeEventListener('resize', updateDims);
+  }, []);
 
   // Reset index if words change
   useEffect(() => {
@@ -163,21 +187,22 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   };
 
   // High-performance decoupled text masking update:
-  // Updates CSS classes (.is-covered / .is-uncovered) directly on chunk elements
+  // Direct class toggle (.is-covered / .is-uncovered) on chunk elements.
   // ZERO React re-render, ZERO forced layout thrashing during drag!
   const updateMasking = useCallback((y: number) => {
-    if (!cardRef.current || !sheetRef.current) return;
+    if (!viewportRef.current || !sheetRef.current) return;
 
-    const sheetH = sheetRef.current.clientHeight || 360;
-    const sheetTop = y;
-    const sheetBottom = y + sheetH;
+    const vpRect = viewportRef.current.getBoundingClientRect();
+    const sheetH = sheetRef.current.clientHeight || calculateSheetHeight(vpRect.height);
+    const sheetScreenTop = vpRect.top + y;
+    const sheetScreenBottom = sheetScreenTop + sheetH;
 
-    // Fast path during active dragging: compare against cached coordinates
+    // Fast path during active dragging: compare against cached screen coordinates
     if (isDraggingRef.current && cachedChunksRef.current.length > 0) {
       const chunks = cachedChunksRef.current;
       for (let i = 0; i < chunks.length; i++) {
         const c = chunks[i];
-        const isCovered = c.top + 2 < sheetBottom && c.bottom - 2 > sheetTop;
+        const isCovered = c.screenTop + 2 < sheetScreenBottom && c.screenBottom - 2 > sheetScreenTop;
         if (isCovered) {
           if (!c.el.classList.contains('is-covered')) {
             c.el.classList.add('is-covered');
@@ -193,15 +218,11 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       return;
     }
 
-    // Normal path (mount, word switch, or scroll): read live viewport coordinates
-    const sheetRect = sheetRef.current.getBoundingClientRect();
-    const sTop = sheetRect.top;
-    const sBottom = sheetRect.bottom;
-    const chunkEls = cardRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk');
-
+    // Normal path (mount, word switch, or scroll): read live screen bounding coordinates
+    const chunkEls = viewportRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk');
     chunkEls.forEach((el) => {
       const r = el.getBoundingClientRect();
-      const isCovered = r.top + 2 < sBottom && r.bottom - 2 > sTop;
+      const isCovered = r.top + 2 < sheetScreenBottom && r.bottom - 2 > sheetScreenTop;
       if (isCovered) {
         el.classList.add('is-covered');
         el.classList.remove('is-uncovered');
@@ -212,11 +233,13 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     });
   }, []);
 
-  // Physical Red Sheet Dragging (Pointer Events + Direct DOM transform)
+  // Physical Red Sheet Dragging:
+  // Uses relative coordinates inside viewportRef:
+  // sheetY = relative Y from viewportRef top (0 = top of card, maxY = bottom of viewport above toolbar)
   const handleSheetPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     const target = e.target as HTMLElement;
-    // Don't start drag if clicking a button inside the sheet handle
+    // Don't drag if clicking buttons inside the handle
     if (target.closest('button')) return;
 
     e.preventDefault();
@@ -226,40 +249,46 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     } catch {}
 
-    // Measure chunk positions relative to card container ONCE at drag start
-    if (cardRef.current) {
-      const cardRect = cardRef.current.getBoundingClientRect();
-      const scrollTop = cardRef.current.scrollTop;
-      const chunkEls = Array.from(cardRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk'));
-      cachedChunksRef.current = chunkEls.map((el) => {
-        const r = el.getBoundingClientRect();
-        return {
-          el,
-          top: r.top - cardRect.top + scrollTop,
-          bottom: r.bottom - cardRect.top + scrollTop,
-        };
-      });
-    }
+    if (!viewportRef.current || !sheetRef.current) return;
+    const vpRect = viewportRef.current.getBoundingClientRect();
+    const pointerYInVp = e.clientY - vpRect.top;
 
+    // Distance inside sheet from top of sheet to touch point: eliminates touch-start jumping
+    grabOffsetYRef.current = pointerYInVp - sheetYRef.current;
     isDraggingRef.current = true;
-    dragStartYRef.current = e.clientY;
-    dragStartOffsetYRef.current = sheetYRef.current;
     setIsDraggingSheet(true);
+
+    // Cache chunk screen positions once upon drag start (avoids layout thrashing during move!)
+    const chunkEls = Array.from(viewportRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk'));
+    cachedChunksRef.current = chunkEls.map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        el,
+        screenTop: r.top,
+        screenBottom: r.bottom,
+      };
+    });
   };
 
   const handleSheetPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current || !cardRef.current || !sheetRef.current) return;
+    if (!isDraggingRef.current || !viewportRef.current || !sheetRef.current) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const cardH = cardRef.current.clientHeight || 500;
-    const sheetH = sheetRef.current.clientHeight || 360;
-    // Bounds: bottom handle remains visible at top; top handle remains visible at bottom
-    const minY = -(sheetH - 44);
-    const maxY = cardH - 44;
+    const vpRect = viewportRef.current.getBoundingClientRect();
+    const vpH = vpRect.height;
+    const sheetH = sheetRef.current.clientHeight || calculateSheetHeight(vpH);
 
-    const deltaY = e.clientY - dragStartYRef.current;
-    const nextY = Math.min(Math.max(minY, dragStartOffsetYRef.current + deltaY), maxY);
+    // Strict bounds:
+    // minY = 0 (sheet top is flush with card top)
+    // maxY = vpH - sheetH (sheet bottom is flush with bottom of viewport, strictly above Bottom Toolbar)
+    const minY = 0;
+    const maxY = Math.max(0, vpH - sheetH);
+
+    const pointerYInVp = e.clientY - vpRect.top;
+    const targetY = pointerYInVp - grabOffsetYRef.current;
+    const nextY = Math.min(Math.max(minY, targetY), maxY);
+
     sheetYRef.current = nextY;
 
     if (rAFRef.current) {
@@ -281,7 +310,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
       } catch {}
       isDraggingRef.current = false;
       setIsDraggingSheet(false);
-      setIsSheetAtTop(sheetYRef.current <= 50);
+      setIsSheetAtTop(sheetYRef.current <= 30);
       cachedChunksRef.current = [];
     }
   };
@@ -289,8 +318,8 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   // Peek underneath sheet without moving it
   const startPeeking = () => {
     setIsPeeking(true);
-    if (cardRef.current) {
-      cardRef.current.classList.add('card-peeking');
+    if (viewportRef.current) {
+      viewportRef.current.classList.add('card-peeking');
     }
     if (sheetRef.current) {
       sheetRef.current.style.opacity = '0.15';
@@ -299,25 +328,28 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
   const stopPeeking = () => {
     setIsPeeking(false);
-    if (cardRef.current) {
-      cardRef.current.classList.remove('card-peeking');
+    if (viewportRef.current) {
+      viewportRef.current.classList.remove('card-peeking');
     }
     if (sheetRef.current) {
       sheetRef.current.style.opacity = '1';
     }
   };
 
-  // Quick slide preset: toggle between top and bottom
+  // Quick slide preset: toggle smoothly between top (0) and bottom (maxY)
   const quickSlideToggle = () => {
-    if (!sheetRef.current || !cardRef.current) return;
-    const cardH = cardRef.current.clientHeight || 500;
-    const sheetH = sheetRef.current.clientHeight || 360;
-    const targetY = sheetYRef.current <= 50 ? Math.max(cardH - sheetH, 200) : 0;
+    if (!sheetRef.current || !viewportRef.current) return;
+    const vpH = viewportRef.current.clientHeight || 500;
+    const sheetH = sheetRef.current.clientHeight || calculateSheetHeight(vpH);
+    const maxY = Math.max(0, vpH - sheetH);
+
+    // If near top, slide to bottom (maxY); if near bottom, slide to top (0)
+    const targetY = sheetYRef.current <= 30 ? maxY : 0;
 
     sheetRef.current.style.transition = 'transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1)';
     sheetYRef.current = targetY;
     sheetRef.current.style.transform = `translate3d(0, ${targetY}px, 0)`;
-    setIsSheetAtTop(targetY <= 50);
+    setIsSheetAtTop(targetY <= 30);
     updateMasking(targetY);
 
     setTimeout(() => {
@@ -334,27 +366,42 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
     }
   };
 
-  // Sync masking on active toggle and word changes
+  // Always reset to top (0) when switching words
   useEffect(() => {
+    sheetYRef.current = 0;
+    setIsSheetAtTop(true);
     if (redSheetActive) {
-      setIsSheetAtTop(sheetYRef.current <= 50);
       requestAnimationFrame(() => {
         if (sheetRef.current) {
-          sheetRef.current.style.transform = `translate3d(0, ${sheetYRef.current}px, 0)`;
-          updateMasking(sheetYRef.current);
+          sheetRef.current.style.transform = 'translate3d(0, 0, 0)';
+          updateMasking(0);
+        }
+      });
+    }
+  }, [currentIndex]);
+
+  // Sync masking on active toggle
+  useEffect(() => {
+    if (redSheetActive) {
+      sheetYRef.current = 0;
+      setIsSheetAtTop(true);
+      requestAnimationFrame(() => {
+        if (sheetRef.current) {
+          sheetRef.current.style.transform = 'translate3d(0, 0, 0)';
+          updateMasking(0);
         }
       });
     } else {
-      if (cardRef.current) {
-        cardRef.current.classList.remove('card-peeking');
-        const chunkEls = cardRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk');
+      if (viewportRef.current) {
+        viewportRef.current.classList.remove('card-peeking');
+        const chunkEls = viewportRef.current.querySelectorAll<HTMLElement>('.kotoba-rs-chunk');
         chunkEls.forEach((el) => {
           el.classList.remove('is-covered');
           el.classList.add('is-uncovered');
         });
       }
     }
-  }, [redSheetActive, currentIndex, updateMasking]);
+  }, [redSheetActive, updateMasking]);
 
   // Range-based slice chunk rendering:
   // 1. Slices text into contiguous intervals (zero character splitting).
@@ -445,9 +492,9 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-[#F7F4EE] text-[#211E1C] select-none pb-safe">
+    <div className="h-dvh flex flex-col justify-between bg-[#F7F4EE] text-[#211E1C] select-none overflow-hidden">
       {/* 1. Top Navigation */}
-      <header className="sticky top-0 z-30 bg-[#F7F4EE]/95 backdrop-blur-md border-b border-[#E6E0CF] px-3 py-2 pt-safe">
+      <header className="shrink-0 sticky top-0 z-30 bg-[#F7F4EE]/95 backdrop-blur-md border-b border-[#E6E0CF] px-3 py-2 pt-safe">
         <div className="max-w-md mx-auto flex items-center justify-between">
           {/* Back button (hit area >= 44x44px) */}
           <button
@@ -496,20 +543,24 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
         </div>
       </header>
 
-      {/* 2. Main Page Surface */}
+      {/* 2. Main Page Surface (Occupies exactly the space between Header and Bottom Toolbar) */}
       <main
-        className="flex-1 max-w-md w-full mx-auto px-4 py-3 flex flex-col justify-start relative overflow-hidden"
+        className="flex-1 min-h-0 max-w-md w-full mx-auto px-3 sm:px-4 py-2 sm:py-3 flex flex-col relative overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
         {words.length > 0 && currentWord ? (
-          <div className="relative w-full">
-            {/* Paper Sheet Container */}
+          /* Viewport container strictly bounded between Header and Bottom Toolbar */
+          <div
+            ref={viewportRef}
+            className="relative w-full h-full min-h-0 flex flex-col overflow-hidden rounded-2xl"
+          >
+            {/* Scrollable Paper Sheet Card */}
             <div
               ref={cardRef}
               onScroll={handleCardScroll}
-              className={`w-full min-h-[calc(100vh-140px)] rounded-2xl bg-[#FFFDF8] border border-[#E8E2D2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between relative transition-transform duration-150 ${
-                isDraggingSheet ? 'overflow-hidden touch-none' : 'overflow-y-auto'
+              className={`w-full h-full overflow-y-auto rounded-2xl bg-[#FFFDF8] border border-[#E8E2D2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between relative transition-transform duration-150 ${
+                isDraggingSheet ? 'touch-none' : ''
               } ${
                 swipeDirection === 'left'
                   ? '-translate-x-4 opacity-70'
@@ -632,7 +683,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
             {/* Sticky Notes Tray attached to right edge */}
             {settings.showStickyNotes && (
-              <div className="sticky-note-area">
+              <div className="sticky-note-area z-25">
                 <StickyNotesTray
                   notes={currentWordNotes}
                   wordId={currentWord.id}
@@ -643,19 +694,20 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
             )}
 
             {/* Physical Red Sheet Overlay:
-                一定の高さを持つ透明な赤いプラスチックシートそのものを translate3d で上下にスライド。
-                指に1:1で即座に追従し、Reactの全体再レンダリングやレイアウト計算を発生させない。 */}
+                Positioned inside viewportRef (strictly above Bottom Toolbar).
+                Moving range: 0 (top flush) to maxY (bottom flush above Bottom Toolbar).
+                Can never get buried under the Bottom Toolbar!
+                Both handles and entire sheet body are 100% accessible at all times! */}
             {redSheetActive && (
               <div
                 ref={sheetRef}
-                className="red-sheet-element absolute left-2 right-2 z-30 select-none touch-none rounded-2xl flex flex-col will-change-transform pointer-events-auto"
+                className="red-sheet-element absolute left-1.5 right-1.5 z-20 select-none touch-none rounded-2xl flex flex-col will-change-transform shadow-xl pointer-events-auto"
                 style={{
-                  height: 'min(380px, 72%)',
-                  minHeight: '260px',
+                  height: `${sheetHeight}px`,
                   transform: `translate3d(0, ${sheetYRef.current}px, 0)`,
                   backgroundColor: 'rgba(225, 29, 72, 0.84)',
                   boxShadow:
-                    '0 14px 36px -4px rgba(190, 18, 60, 0.42), 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 1px 2px rgba(255, 255, 255, 0.35)',
+                    '0 12px 32px -4px rgba(190, 18, 60, 0.42), 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 1px 2px rgba(255, 255, 255, 0.35)',
                   border: '1.5px solid rgba(255, 255, 255, 0.3)',
                   backdropFilter: 'blur(0.5px)',
                   touchAction: 'none',
@@ -676,7 +728,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
                   </div>
                   {/* Tactile Grab Indicator Bar */}
                   <div className="flex items-center gap-1">
-                    <div className="w-12 h-1 rounded-full bg-white/70" />
+                    <div className="w-12 h-1 rounded-full bg-white/75" />
                   </div>
                   <div className="text-[10px] text-white/75 font-mono">↕ スライド</div>
                 </div>
@@ -730,10 +782,10 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
 
                   {/* Center: Tactile Grip Handle */}
                   <div className="flex items-center gap-1 px-2">
-                    <div className="w-14 h-1.5 rounded-full bg-white/80" />
+                    <div className="w-14 h-1.5 rounded-full bg-white/85" />
                   </div>
 
-                  {/* Right: Quick Slide Preset Toggle */}
+                  {/* Right: Quick Slide Preset Toggle (Top <-> Bottom) */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -751,7 +803,7 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
           </div>
         ) : (
           /* Empty Chapter Words State */
-          <div className="w-full min-h-[380px] rounded-2xl bg-[#FFFDF8] border border-[#E5DEC9] p-8 shadow-2xs flex flex-col items-center justify-center text-center my-auto">
+          <div className="w-full h-full rounded-2xl bg-[#FFFDF8] border border-[#E5DEC9] p-8 shadow-2xs flex flex-col items-center justify-center text-center my-auto">
             <h3 className="text-base font-bold text-[#211E1C]">
               このChapterにはまだ単語がありません
             </h3>
@@ -768,8 +820,8 @@ export const WordPageView: React.FC<WordPageViewProps> = ({
         )}
       </main>
 
-      {/* 3. Bottom Toolbar */}
-      <footer className="sticky bottom-0 z-30 bg-[#FAF7F0]/95 backdrop-blur-md border-t border-[#E8E2D2] px-3 py-2 pb-safe">
+      {/* 3. Bottom Toolbar (Fixed at bottom of screen, shrink-0, z-30) */}
+      <footer className="shrink-0 z-30 bg-[#FAF7F0]/95 backdrop-blur-md border-t border-[#E8E2D2] px-3 py-2 pb-safe">
         <div className="max-w-md mx-auto grid grid-cols-4 items-center gap-1">
           {/* 1. 🟥 赤シート */}
           <button
